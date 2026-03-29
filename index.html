@@ -132,6 +132,17 @@ function sfx(type) {
       g.gain.setValueAtTime(0.2, t);
       g.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
       o.start(t); o.stop(t + 0.2);
+    } else if (type === 'powerup') {
+      [0, 0.07, 0.14, 0.22].forEach((d, i) => {
+        const freqs = [500, 650, 800, 1050];
+        const o = AC.createOscillator(), g = AC.createGain();
+        o.connect(g); g.connect(AC.destination);
+        o.type = 'square';
+        o.frequency.value = freqs[i];
+        g.gain.setValueAtTime(0.22, t + d);
+        g.gain.exponentialRampToValueAtTime(0.001, t + d + 0.1);
+        o.start(t + d); o.stop(t + d + 0.12);
+      });
     }
   } catch (e) {}
 }
@@ -168,6 +179,13 @@ let frame = 0, shakeFrames = 0, shakeAmt = 0;
 let coins = 0;        // persists across games
 let bossAlert = 0;    // countdown for boss entrance animation
 let shopSel = 0;      // selected shop item index
+let powerups = [];    // dropped power-up items on field
+let activePU = null;  // { type, timer } — currently active power-up
+
+const PU_DURATION = 600; // 10 seconds at 60 fps
+const PU_TYPES    = ['shield', 'invis', 'bloodhound'];
+const PU_COLS     = { shield: '#4488ff', invis: '#cc44ff', bloodhound: '#ff4422' };
+const PU_LABELS   = { shield: 'SHIELD', invis: 'INVISIBLE', bloodhound: 'BLOODHOUND' };
 
 // ── Upgrade System ────────────────────────────
 const upgrades = { speed: 0, fireRate: 0, bulletSpd: 0, lives: 0 };
@@ -309,16 +327,18 @@ function spawnEnemy() {
 // ── Fire bullet toward mouse ──────────────────
 function fireBullet() {
   if (PL.cd > 0) return;
+  if (activePU && activePU.type === 'shield') return; // can't attack while shielded
   const dx = mouse.x - PL.x;
   const dy = mouse.y - PL.y;
   const len = Math.hypot(dx, dy) || 1;
   const bspd = 10 + upgrades.bulletSpd * 1.5;
+  const dmg  = (activePU && activePU.type === 'bloodhound') ? 2 : 1;
   bullets.push({
     x: PL.x + (dx / len) * (PL.h * 0.6),
     y: PL.y + (dy / len) * (PL.h * 0.6),
     vx: (dx / len) * bspd,
     vy: (dy / len) * bspd,
-    w: 5, h: 5,
+    w: 5, h: 5, dmg,
   });
   PL.cd = PL.cdMax;
   sfx('shoot');
@@ -366,10 +386,31 @@ function update() {
   if (PL.cd  > 0) PL.cd--;
   if (PL.inv > 0) PL.inv--;
 
-  if ((keys.ArrowLeft  || keys.KeyA) && PL.x - PL.w / 2 > 2)        PL.x -= PL.spd;
-  if ((keys.ArrowRight || keys.KeyD) && PL.x + PL.w / 2 < W - 2)    PL.x += PL.spd;
-  if ((keys.ArrowUp    || keys.KeyW) && PL.y - PL.h / 2 > H * 0.46) PL.y -= PL.spd;
-  if ((keys.ArrowDown  || keys.KeyS) && PL.y + PL.h / 2 < H - 18)   PL.y += PL.spd;
+  // ── Active power-up countdown ──
+  if (activePU) {
+    activePU.timer--;
+    if (activePU.timer <= 0) activePU = null;
+  }
+
+  // ── Collect power-ups ──
+  for (let i = powerups.length - 1; i >= 0; i--) {
+    const pu = powerups[i];
+    pu.timer--;
+    if (pu.timer <= 0) { powerups.splice(i, 1); continue; }
+    if (hits(pu.x, pu.y, 20, 20, PL.x, PL.y, PL.w, PL.h)) {
+      activePU = { type: pu.type, timer: PU_DURATION };
+      powerups.splice(i, 1);
+      sfx('powerup');
+      popup(PL.x, PL.y - 40, PU_LABELS[pu.type] + '!', PU_COLS[pu.type]);
+    }
+  }
+
+  const spdMult = (activePU && activePU.type !== 'shield') ? 2 : 1;
+  const spd = PL.spd * spdMult;
+  if ((keys.ArrowLeft  || keys.KeyA) && PL.x - PL.w / 2 > 2)        PL.x -= spd;
+  if ((keys.ArrowRight || keys.KeyD) && PL.x + PL.w / 2 < W - 2)    PL.x += spd;
+  if ((keys.ArrowUp    || keys.KeyW) && PL.y - PL.h / 2 > H * 0.46) PL.y -= spd;
+  if ((keys.ArrowDown  || keys.KeyS) && PL.y + PL.h / 2 < H - 18)   PL.y += spd;
 
   if (keys.Space || keys.KeyZ) fireBullet();
 
@@ -392,12 +433,15 @@ function update() {
   // ── Enemies ──
   // Homing strength per type: how strongly they steer toward player x
   const HOMING = { basic: 0.018, scout: 0.038, heavy: 0.010 };
+  const invisible = activePU && activePU.type === 'invis';
   for (const e of enemies) {
     e.y += e.spd;
 
-    // Kamikaze homing — steer x toward player, capped by speed
-    const hdx = (PL.x - e.x) * HOMING[e.key];
-    e.x += Math.max(-e.spd * 2, Math.min(e.spd * 2, hdx));
+    // Kamikaze homing — disabled when player is invisible
+    if (!invisible) {
+      const hdx = (PL.x - e.x) * HOMING[e.key];
+      e.x += Math.max(-e.spd * 2, Math.min(e.spd * 2, hdx));
+    }
     e.x = Math.max(e.w / 2 + 4, Math.min(W - e.w / 2 - 4, e.x));
 
     // Scouts also zigzag on top of homing
@@ -407,12 +451,13 @@ function update() {
       e.x = Math.max(e.w / 2 + 4, Math.min(W - e.w / 2 - 4, e.x));
     }
 
-    // Fire aimed shot toward player
+    // Fire — shoot straight down when player is invisible, aimed when visible
     if (e.fc > 0) { e.fc--; }
     else {
-      const fdx = PL.x - e.x, fdy = PL.y - e.y;
-      const flen = Math.hypot(fdx, fdy) || 1;
       const bspd = 2.8 + level * 0.18;
+      const fdx = invisible ? 0        : PL.x - e.x;
+      const fdy = invisible ? bspd     : PL.y - e.y;
+      const flen = Math.hypot(fdx, fdy) || 1;
       eBullets.push({
         x: e.x, y: e.y + e.h / 2 + 4,
         vx: (fdx / flen) * bspd, vy: (fdy / flen) * bspd,
@@ -438,13 +483,18 @@ function update() {
       const e = enemies[ei];
       if (hits(b.x, b.y, b.w, b.h, e.x, e.y, e.w, e.h)) {
         bullets.splice(bi, 1);
-        e.hp--;
+        e.hp -= b.dmg || 1;
         if (e.hp <= 0) {
           score += e.pts;
           popup(e.x, e.y, '+' + e.pts);
           burst(e.x, e.y, e.col, 18);
           sfx('boom');
           shakeFrames = 9; shakeAmt = 4;
+          // Drop random power-up when heavy boss is killed
+          if (e.key === 'heavy') {
+            const type = PU_TYPES[Math.floor(Math.random() * PU_TYPES.length)];
+            powerups.push({ x: e.x, y: e.y, type, timer: 420 }); // 7 sec to collect
+          }
           // Respawn at top instead of deleting
           e.y  = -e.h - rnd(20, 120);
           e.x  = rnd(e.w / 2 + 12, W - e.w / 2 - 12);
@@ -460,12 +510,14 @@ function update() {
   }
 
   // ── Enemy bullet → Player ──
-  if (PL.inv === 0) {
+  const shielded = activePU && activePU.type === 'shield';
+  const tanky    = activePU && activePU.type === 'bloodhound';
+  if (PL.inv === 0 && !shielded) {
     for (let i = eBullets.length - 1; i >= 0; i--) {
       if (hits(eBullets[i].x, eBullets[i].y, eBullets[i].w, eBullets[i].h,
                PL.x, PL.y, PL.w, PL.h)) {
         eBullets.splice(i, 1);
-        takeDamage();
+        takeDamage(tanky ? 0.5 : 1);
         break;
       }
     }
@@ -475,8 +527,9 @@ function update() {
         e.y  = -e.h - rnd(20, 120);
         e.x  = rnd(e.w / 2 + 12, W - e.w / 2 - 12);
         e.hp = e.maxHp;
-        takeDamage(0.5);   // kamikaze ram = half a life
-        popup(PL.x, PL.y - 30, '-½ LIFE', '#ff4444');
+        const ramDmg = tanky ? 0.25 : 0.5;
+        takeDamage(ramDmg);
+        popup(PL.x, PL.y - 30, tanky ? '-¼ LIFE' : '-½ LIFE', '#ff4444');
         break;
       }
     }
@@ -588,11 +641,46 @@ function drawPlay() {
     ctx.strokeRect(bx, by, bw, 5);
   }
 
+  // ── Power-up drops ──
+  for (const pu of powerups) {
+    const pulse = 0.7 + 0.3 * Math.sin(frame * 0.12);
+    ctx.shadowBlur  = 16 * pulse; ctx.shadowColor = PU_COLS[pu.type];
+    ctx.fillStyle   = PU_COLS[pu.type];
+    ctx.globalAlpha = pulse;
+    ctx.beginPath();
+    ctx.arc(pu.x | 0, pu.y | 0, 12, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+    ctx.fillStyle   = '#fff';
+    ctx.font        = 'bold 10px "Courier New"';
+    ctx.textAlign   = 'center';
+    const icon = { shield: 'S', invis: 'I', bloodhound: 'B' }[pu.type];
+    ctx.fillText(icon, pu.x | 0, (pu.y + 4) | 0);
+    // Fading timer ring
+    ctx.strokeStyle = PU_COLS[pu.type];
+    ctx.lineWidth   = 2;
+    ctx.globalAlpha = 0.4;
+    ctx.beginPath();
+    ctx.arc(pu.x | 0, pu.y | 0, 15, -Math.PI / 2,
+            -Math.PI / 2 + Math.PI * 2 * (pu.timer / 420));
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
+
   // ── Player (mouse-aimed turret, blinks when invincible) ──
   const aimAngle = Math.atan2(mouse.y - PL.y, mouse.x - PL.x);
   if (PL.inv === 0 || (frame >> 2) & 1) {
+    // Power-up glow on player
+    if (activePU) {
+      const pc = PU_COLS[activePU.type];
+      ctx.shadowBlur  = 22 + 8 * Math.sin(frame * 0.15);
+      ctx.shadowColor = pc;
+      if (activePU.type === 'invis') ctx.globalAlpha = 0.35;
+    }
     drawTank(PL.x, PL.y, PL.w, PL.h, '#00cc66', '#00ffaa', true, aimAngle);
-    ctx.fillStyle = 'rgba(0,255,80,0.12)';
+    ctx.shadowBlur  = 0;
+    ctx.globalAlpha = 1;
+    ctx.fillStyle   = 'rgba(0,255,80,0.12)';
     ctx.beginPath();
     ctx.ellipse(PL.x | 0, (PL.y + PL.h / 2) | 0, PL.w * 0.55, 5, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -644,6 +732,25 @@ function drawHUD() {
   ctx.fillStyle   = '#334433';
   ctx.font        = '10px "Courier New"';
   ctx.fillText('[ESC] MENU  [U] SHOP', W / 2, 31);
+
+  // Active power-up bar (bottom-center)
+  if (activePU) {
+    const pc  = PU_COLS[activePU.type];
+    const pct = activePU.timer / PU_DURATION;
+    const bx  = (W / 2 - 80) | 0, by = H - 28;
+    ctx.fillStyle = 'rgba(0,0,0,0.65)';
+    ctx.fillRect(bx - 2, by - 2, 164, 20);
+    ctx.fillStyle = pc;
+    ctx.fillRect(bx, by, (160 * pct) | 0, 16);
+    ctx.strokeStyle = pc; ctx.lineWidth = 1;
+    ctx.strokeRect(bx, by, 160, 16);
+    ctx.shadowBlur  = 8; ctx.shadowColor = pc;
+    ctx.fillStyle   = '#fff';
+    ctx.font        = 'bold 11px "Courier New"';
+    ctx.textAlign   = 'center';
+    ctx.fillText(PU_LABELS[activePU.type], W / 2, by + 12);
+    ctx.shadowBlur  = 0;
+  }
 
   ctx.fillStyle   = '#00ff55';
   ctx.font        = 'bold 14px "Courier New"';
@@ -857,6 +964,7 @@ function startGame() {
   score = 0; level = 1; frame = 0;
   shakeFrames = 0; spawnTimer = 0; bossAlert = 0;
   bullets = []; eBullets = []; enemies = []; particles = []; popups = [];
+  powerups = []; activePU = null;
   PL.x    = W / 2; PL.y = H - 80;
   PL.spd  = 4 + upgrades.speed    * 0.5;
   PL.cdMax = Math.max(6, 16 - upgrades.fireRate * 2);
