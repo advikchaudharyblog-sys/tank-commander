@@ -156,6 +156,10 @@ window.addEventListener('keydown', e => {
   if (e.code === 'Enter')  onEnter();
   if (e.code === 'Escape') onEscape();
   if (e.code === 'KeyU' && state === 'menu') state = 'shop';
+  if (state === 'menu') {
+    if (e.code === 'ArrowLeft')  diffSel = (diffSel + 2) % 3;
+    if (e.code === 'ArrowRight') diffSel = (diffSel + 1) % 3;
+  }
   if (state === 'shop') {
     if (e.code === 'ArrowUp')   shopSel = (shopSel + SHOP_ITEMS.length - 1) % SHOP_ITEMS.length;
     if (e.code === 'ArrowDown') shopSel = (shopSel + 1) % SHOP_ITEMS.length;
@@ -181,6 +185,14 @@ let bossAlert = 0;    // countdown for boss entrance animation
 let shopSel = 0;      // selected shop item index
 let powerups = [];    // dropped power-up items on field
 let activePU = null;  // { type, timer } — currently active power-up
+let diffSel  = 1;     // 0=easy 1=normal 2=hard (persists between games)
+
+const DIFFS = ['easy', 'normal', 'hard'];
+const DIFF_MODS = {
+  easy:   { hpMult: 0.6, spdMult: 0.7, frMult: 1.6, bspdMult: 0.7, dmgMult: 0.5  },
+  normal: { hpMult: 1,   spdMult: 1,   frMult: 1,   bspdMult: 1,   dmgMult: 1    },
+  hard:   { hpMult: 1.6, spdMult: 1.35, frMult: 0.65, bspdMult: 1.3, dmgMult: 1.5 },
+};
 
 const PU_DURATION = 600; // 10 seconds at 60 fps
 const PU_TYPES    = ['shield', 'invis', 'bloodhound'];
@@ -190,10 +202,10 @@ const PU_LABELS   = { shield: 'SHIELD', invis: 'INVISIBLE', bloodhound: 'BLOODHO
 // ── Upgrade System ────────────────────────────
 const upgrades = { speed: 0, fireRate: 0, bulletSpd: 0, lives: 0 };
 const SHOP_ITEMS = [
-  { key: 'speed',     label: 'MOVE SPEED',    desc: '+0.5 speed per rank',   cost: 100, max: 5 },
-  { key: 'fireRate',  label: 'FIRE RATE',     desc: '-2 cooldown per rank',  cost: 100, max: 5 },
-  { key: 'bulletSpd', label: 'BULLET SPEED',  desc: '+1.5 spd per rank',    cost: 100, max: 5 },
-  { key: 'lives',     label: 'EXTRA LIFE',    desc: '+1 starting life',      cost: 150, max: 3 },
+  { key: 'speed',     label: 'MOVE SPEED',   desc: '+0.5 speed per rank',  costs: [100, 450, 1000, 2000, 3500], max: 5 },
+  { key: 'fireRate',  label: 'FIRE RATE',    desc: '-2 cooldown per rank', costs: [100, 450, 1000, 2000, 3500], max: 5 },
+  { key: 'bulletSpd', label: 'BULLET SPEED', desc: '+1.5 spd per rank',   costs: [100, 450, 1000, 2000, 3500], max: 5 },
+  { key: 'lives',     label: 'EXTRA LIFE',   desc: '+1 starting life',     costs: [150, 675, 1500],             max: 3 },
 ];
 
 // ── Player ────────────────────────────────────
@@ -303,16 +315,18 @@ function spawnEnemy() {
   if (level >= 5) pool.push('heavy', 'heavy');
 
   const key = pool[Math.floor(Math.random() * pool.length)];
-  const d = EDEFS[key];
+  const d  = EDEFS[key];
+  const dm = DIFF_MODS[DIFFS[diffSel]];
+  const eHp = Math.max(1, Math.round(d.hp * dm.hpMult));
   enemies.push({
     key, x: rnd(d.w / 2 + 12, W - d.w / 2 - 12), y: -d.h,
     w: d.w, h: d.h,
-    hp: d.hp, maxHp: d.hp,
-    spd: d.spd + (level - 1) * 0.09,
+    hp: eHp, maxHp: eHp,
+    spd: (d.spd + (level - 1) * 0.09) * dm.spdMult,
     pts: d.pts, col: d.col, tcol: d.tcol,
     pat: d.pat,
     fc: Math.floor(rnd(0, d.fRate)),
-    fr: Math.max(42, d.fRate - level * 6),
+    fr: Math.max(30, Math.round((d.fRate - level * 6) * dm.frMult)),
     zzd: Math.random() < 0.5 ? 1 : -1,
     zzt: 0,
   });
@@ -441,7 +455,7 @@ function update() {
     // Fire — shoot straight down when player is invisible, aimed when visible
     if (e.fc > 0) { e.fc--; }
     else {
-      const bspd = 2.8 + level * 0.18;
+      const bspd = (2.8 + level * 0.18) * DIFF_MODS[DIFFS[diffSel]].bspdMult;
       const fdx = invisible ? 0        : PL.x - e.x;
       const fdy = invisible ? bspd     : PL.y - e.y;
       const flen = Math.hypot(fdx, fdy) || 1;
@@ -477,8 +491,8 @@ function update() {
           burst(e.x, e.y, e.col, 18);
           sfx('boom');
           shakeFrames = 9; shakeAmt = 4;
-          // Instantly activate random power-up when heavy boss is killed
-          if (e.key === 'heavy') {
+          // Instantly activate random power-up when heavy boss is killed (disabled on hard)
+          if (e.key === 'heavy' && DIFFS[diffSel] !== 'hard') {
             const type = PU_TYPES[Math.floor(Math.random() * PU_TYPES.length)];
             activePU = { type, timer: PU_DURATION };
             sfx('powerup');
@@ -543,7 +557,7 @@ function update() {
 }
 
 function takeDamage(amount = 1) {
-  lives -= amount;
+  lives -= amount * DIFF_MODS[DIFFS[diffSel]].dmgMult;
   PL.inv = 110;
   shakeFrames = amount >= 1 ? 20 : 10; shakeAmt = amount >= 1 ? 7 : 4;
   burst(PL.x, PL.y, '#00ff88', amount >= 1 ? 24 : 12);
@@ -718,7 +732,7 @@ function drawHUD() {
   ctx.fillStyle   = '#00ff55';
   ctx.font        = 'bold 14px "Courier New"';
   ctx.textAlign   = 'right';
-  ctx.fillText(`LV ${level}`, W - 140, 23);
+  ctx.fillText(`LV ${level}  ${DIFFS[diffSel].toUpperCase()}`, W - 140, 23);
 
   const maxLives = 3 + upgrades.lives;
   for (let i = 0; i < maxLives; i++) {
@@ -750,21 +764,45 @@ function drawMenu() {
 
   ctx.fillStyle   = '#226622';
   ctx.font        = '13px "Courier New"';
-  ctx.fillText('MOVE: ARROWS/WASD   AIM: MOUSE   SHOOT: SPACE', W / 2, H / 2 + 62);
+  ctx.fillText('MOVE: ARROWS/WASD   AIM: MOUSE   SHOOT: SPACE', W / 2, H / 2 + 55);
+
+  // ── Difficulty selector ──
+  const diffNames  = ['EASY', 'NORMAL', 'HARD'];
+  const diffColors = ['#44dd44', '#ffcc00', '#ff4422'];
+  const diffDescs  = ['slower enemies, less health', 'balanced', 'faster, tougher, no power-ups'];
+  const btnW = 120, gap = 18, startX = W / 2 - (btnW * 3 + gap * 2) / 2;
+  ctx.font = 'bold 13px "Courier New"';
+  for (let i = 0; i < 3; i++) {
+    const bx = startX + i * (btnW + gap);
+    const sel = i === diffSel;
+    ctx.fillStyle = sel ? diffColors[i] : 'rgba(255,255,255,0.08)';
+    ctx.fillRect(bx, H / 2 + 70, btnW, 30);
+    ctx.strokeStyle = sel ? diffColors[i] : '#334433';
+    ctx.lineWidth = sel ? 2 : 1;
+    ctx.strokeRect(bx, H / 2 + 70, btnW, 30);
+    ctx.fillStyle = sel ? '#000' : diffColors[i];
+    ctx.textAlign = 'center';
+    ctx.fillText(diffNames[i], bx + btnW / 2, H / 2 + 91);
+  }
+  ctx.fillStyle = diffColors[diffSel];
+  ctx.font      = '11px "Courier New"';
+  ctx.fillText(diffDescs[diffSel], W / 2, H / 2 + 116);
+  ctx.fillStyle = '#334433';
+  ctx.fillText('\u2190 \u2192  CHANGE DIFFICULTY', W / 2, H / 2 + 130);
 
   ctx.fillStyle = '#ffcc00';
-  ctx.font      = 'bold 15px "Courier New"';
-  ctx.fillText(`\u2B21 COINS: ${coins}`, W / 2, H / 2 + 88);
+  ctx.font      = 'bold 14px "Courier New"';
+  ctx.fillText(`\u2B21 COINS: ${coins}`, W / 2, H / 2 + 150);
 
-  // Blink
+  // Blink start
   if ((frame >> 4) & 1) {
     ctx.fillStyle   = '#ccffcc';
-    ctx.font        = 'bold 18px "Courier New"';
-    ctx.fillText('[ ENTER ]  START GAME', W / 2, H / 2 + 118);
+    ctx.font        = 'bold 17px "Courier New"';
+    ctx.fillText('[ ENTER ]  START GAME', W / 2, H / 2 + 174);
   }
   ctx.fillStyle = '#aacc66';
-  ctx.font      = 'bold 14px "Courier New"';
-  ctx.fillText('[ U ]  UPGRADE SHOP', W / 2, H / 2 + 144);
+  ctx.font      = 'bold 13px "Courier New"';
+  ctx.fillText('[ U ]  UPGRADE SHOP', W / 2, H / 2 + 196);
 
   // Enemy showcase
   const showcase = [
@@ -832,7 +870,8 @@ function drawShop() {
     const sel    = i === shopSel;
     const lv     = upgrades[item.key];
     const maxed  = lv >= item.max;
-    const canBuy = !maxed && coins >= item.cost;
+    const nextCost = item.costs[lv] ?? item.costs[item.costs.length - 1];
+    const canBuy = !maxed && coins >= nextCost;
 
     ctx.fillStyle   = sel ? 'rgba(0,255,80,0.1)' : 'rgba(0,0,0,0.4)';
     ctx.fillRect(116, iy, W - 232, 66);
@@ -866,7 +905,7 @@ function drawShop() {
     } else {
       ctx.fillStyle = canBuy ? '#ffcc00' : '#664422';
       ctx.font = 'bold 14px "Courier New"';
-      ctx.fillText(`\u2B21 ${item.cost}`, W - 120, iy + 38);
+      ctx.fillText(`\u2B21 ${nextCost}`, W - 120, iy + 38);
     }
   });
 
@@ -917,8 +956,10 @@ function onEscape() {
 
 function buyUpgrade() {
   const item = SHOP_ITEMS[shopSel];
-  if (upgrades[item.key] >= item.max || coins < item.cost) return;
-  coins -= item.cost;
+  const lv   = upgrades[item.key];
+  const cost = item.costs[lv] ?? item.costs[item.costs.length - 1];
+  if (lv >= item.max || coins < cost) return;
+  coins -= cost;
   upgrades[item.key]++;
   sfx('buy');
 }
