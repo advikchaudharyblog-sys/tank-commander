@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cool Quotes</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: linear-gradient(135deg, #1a1a2e, #16213e, #0f3460);
+      font-family: 'Segoe UI', sans-serif;
+      color: #fff;
+    }
+
+    .card {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      border-radius: 20px;
+      padding: 50px 40px;
+      max-width: 600px;
+      width: 90%;
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    }
+
+    .label {
+      font-size: 0.75rem;
+      letter-spacing: 4px;
+      text-transform: uppercase;
+      color: #e94560;
+      margin-bottom: 30px;
+    }
+
+    .quote-text {
+      font-size: 1.4rem;
+      line-height: 1.7;
+      color: #e0e0e0;
+      min-height: 100px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: opacity 0.4s ease;
+    }
+
+    .quote-text.fade {
+      opacity: 0;
+    }
+
+    .quote-author {
+      margin-top: 20px;
+      font-size: 0.95rem;
+      color: #e94560;
+      font-style: italic;
+      min-height: 24px;
+      transition: opacity 0.4s ease;
+    }
+
+    .quote-author.fade {
+      opacity: 0;
+    }
+
+    .btn {
+      margin-top: 40px;
+      padding: 14px 40px;
+      background: #e94560;
+      color: #fff;
+      border: none;
+      border-radius: 50px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      letter-spacing: 1px;
+      transition: transform 0.15s ease, box-shadow 0.15s ease;
+      box-shadow: 0 4px 20px rgba(233, 69, 96, 0.4);
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 30px rgba(233, 69, 96, 0.6);
+    }
+
+    .btn:active {
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="label">Quote of the moment</div>
+    <div class="quote-text" id="quote">"The only way to do great work is to love what you do."</div>
+    <div class="quote-author" id="author">— Steve Jobs</div>
+    <button class="btn" onclick="newQuote()">New Quote</button>
+  </div>
+
+  <script>
+    const quotes = [
+      { text: "The only way to do great work is to love what you do.", author: "Steve Jobs" },
+      { text: "In the middle of every difficulty lies opportunity.", author: "Albert Einstein" },
+      { text: "It does not matter how slowly you go as long as you do not stop.", author: "Confucius" },
+      { text: "Life is what happens when you're busy making other plans.", author: "John Lennon" },
+      { text: "The future belongs to those who believe in the beauty of their dreams.", author: "Eleanor Roosevelt" },
+      { text: "You miss 100% of the shots you don't take.", author: "Wayne Gretzky" },
+      { text: "Whether you think you can or you think you can't, you're right.", author: "Henry Ford" },
+      { text: "I have not failed. I've just found 10,000 ways that won't work.", author: "Thomas Edison" },
+      { text: "The only impossible journey is the one you never begin.", author: "Tony Robbins" },
+      { text: "Do one thing every day that scares you.", author: "Eleanor Roosevelt" },
+      { text: "Simplicity is the ultimate sophistication.", author: "Leonardo da Vinci" },
+      { text: "In three words I can sum up everything I've learned about life: it goes on.", author: "Robert Frost" },
+    ];
+
+    let lastIndex = 0;
+
+    function newQuote() {
+      const quoteEl = document.getElementById('quote');
+      const authorEl = document.getElementById('author');
+
+      quoteEl.classList.add('fade');
+      authorEl.classList.add('fade');
+
+      setTimeout(() => {
+        let index;
+        do { index = Math.floor(Math.random() * quotes.length); } while (index === lastIndex);
+        lastIndex = index;
+
+        const { text, author } = quotes[index];
+        quoteEl.textContent = `"${text}"`;
+        authorEl.textContent = `— ${author}`;
+
+        quoteEl.classList.remove('fade');
+        authorEl.classList.remove('fade');
+      }, 400);
+    }
+  </script>
+</body>
+</html>
