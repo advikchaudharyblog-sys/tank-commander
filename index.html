@@ -153,9 +153,37 @@ window.addEventListener('keydown', e => {
   keys[e.code] = true;
   if (['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))
     e.preventDefault();
+
+  // ── Konami code (works on any screen) ──
+  konamiBuf.push(e.code);
+  if (konamiBuf.length > KONAMI_SEQ.length) konamiBuf.shift();
+  if (konamiBuf.join() === KONAMI_SEQ.join()) {
+    rainbowTank = !rainbowTank;
+    konamiBuf   = [];
+    cheatMsg = rainbowTank ? 'RAINBOW MODE ACTIVATED' : 'RAINBOW MODE DEACTIVATED';
+    cheatMsgTimer = 180;
+    sfx('levelup');
+  }
+
+  // ── Cheat panel input ──
+  if (state === 'cheats') {
+    if (e.code === 'Backspace') {
+      cheatInput = cheatInput.slice(0, -1);
+    } else if (e.code === 'Enter') {
+      activateCheat(cheatInput.toUpperCase());
+      cheatInput = '';
+    } else if (e.key.length === 1 && cheatInput.length < 12) {
+      cheatInput += e.key.toUpperCase();
+    }
+    if (e.code === 'Escape') { state = 'menu'; cheatInput = ''; }
+    if (AC.state === 'suspended') AC.resume();
+    return; // swallow all other keys in cheat panel
+  }
+
   if (e.code === 'Enter')  onEnter();
   if (e.code === 'Escape') onEscape();
   if (e.code === 'KeyU' && state === 'menu') state = 'shop';
+  if (e.code === 'KeyC' && state === 'menu') { state = 'cheats'; cheatInput = ''; }
   if (state === 'menu') {
     if (e.code === 'ArrowLeft')  diffSel = (diffSel + 2) % 3;
     if (e.code === 'ArrowRight') diffSel = (diffSel + 1) % 3;
@@ -198,6 +226,36 @@ const PU_DURATION = 600; // 10 seconds at 60 fps
 const PU_TYPES    = ['shield', 'invis', 'bloodhound'];
 const PU_COLS     = { shield: '#4488ff', invis: '#cc44ff', bloodhound: '#ff4422' };
 const PU_LABELS   = { shield: 'SHIELD', invis: 'INVISIBLE', bloodhound: 'BLOODHOUND' };
+
+// ── Cheats ────────────────────────────────────
+const cheats = {
+  godmode:   false,  // invincible
+  overkill:  false,  // 3x damage
+  loaded:    false,  // coins cheat applied (one-shot)
+  speedy:    false,  // 3x move speed
+  fullclip:  false,  // no fire cooldown
+};
+let cheatInput   = '';          // current typed buffer in cheat panel
+let cheatMsg     = '';          // feedback message after activation
+let cheatMsgTimer = 0;
+let rainbowTank  = false;       // konami code reward
+let rainbowHue   = 0;
+
+// Konami: Up Up Down Down Left Right Left Right B A Enter
+const KONAMI_SEQ = [
+  'ArrowUp','ArrowUp','ArrowDown','ArrowDown',
+  'ArrowLeft','ArrowRight','ArrowLeft','ArrowRight',
+  'KeyB','KeyA','Enter'
+];
+let konamiBuf = [];
+
+const CHEAT_DEFS = {
+  GODMODE:  { key: 'godmode',  msg: 'INVINCIBILITY ENGAGED' },
+  OVERKILL: { key: 'overkill', msg: '3X DAMAGE UNLOCKED'    },
+  LOADED:   { key: 'loaded',   msg: '+99999 COINS DEPOSITED' },
+  SPEEDY:   { key: 'speedy',   msg: 'MAX SPEED ACTIVATED'   },
+  FULLCLIP: { key: 'fullclip', msg: 'INFINITE AMMO ONLINE'  },
+};
 
 // ── Upgrade System ────────────────────────────
 const upgrades = { speed: 0, fireRate: 0, bulletSpd: 0, lives: 0 };
@@ -346,7 +404,8 @@ function fireBullet() {
   const dy = mouse.y - PL.y;
   const len = Math.hypot(dx, dy) || 1;
   const bspd = 10 + upgrades.bulletSpd * 1.5;
-  const dmg  = (activePU && activePU.type === 'bloodhound') ? 2 : 1;
+  let dmg = (activePU && activePU.type === 'bloodhound') ? 2 : 1;
+  if (cheats.overkill) dmg = Math.max(dmg, 3);
   bullets.push({
     x: PL.x + (dx / len) * (PL.h * 0.6),
     y: PL.y + (dy / len) * (PL.h * 0.6),
@@ -397,7 +456,7 @@ function update() {
   }
 
   // ── Player ──
-  if (PL.cd  > 0) PL.cd--;
+  if (PL.cd  > 0 && !cheats.fullclip) PL.cd--;
   if (PL.inv > 0) PL.inv--;
 
   // ── Active power-up countdown ──
@@ -406,7 +465,8 @@ function update() {
     if (activePU.timer <= 0) activePU = null;
   }
 
-  const spdMult = (activePU && activePU.type !== 'shield') ? 2 : 1;
+  let spdMult = (activePU && activePU.type !== 'shield') ? 2 : 1;
+  if (cheats.speedy) spdMult = Math.max(spdMult, 3);
   const spd = PL.spd * spdMult;
   if ((keys.ArrowLeft  || keys.KeyA) && PL.x - PL.w / 2 > 2)        PL.x -= spd;
   if ((keys.ArrowRight || keys.KeyD) && PL.x + PL.w / 2 < W - 2)    PL.x += spd;
@@ -513,7 +573,7 @@ function update() {
   }
 
   // ── Enemy bullet → Player ──
-  const shielded = activePU && activePU.type === 'shield';
+  const shielded = (activePU && activePU.type === 'shield') || cheats.godmode;
   const tanky    = activePU && activePU.type === 'bloodhound';
   if (PL.inv === 0 && !shielded) {
     for (let i = eBullets.length - 1; i >= 0; i--) {
@@ -587,8 +647,21 @@ function render() {
 
   if      (state === 'menu')     drawMenu();
   else if (state === 'shop')     drawShop();
+  else if (state === 'cheats')   drawCheats();
   else if (state === 'playing')  { drawPlay(); if (bossAlert > 0) drawBossAlert(); }
   else if (state === 'gameover') { drawPlay(); drawGameOver(); }
+
+  // Global cheat message overlay
+  if (cheatMsgTimer > 0) {
+    cheatMsgTimer--;
+    ctx.globalAlpha = Math.min(1, cheatMsgTimer / 40);
+    ctx.shadowBlur  = 18; ctx.shadowColor = '#ffcc00';
+    ctx.fillStyle   = '#ffcc00';
+    ctx.font        = 'bold 18px "Courier New"';
+    ctx.textAlign   = 'center';
+    ctx.fillText('[ CHEAT ] ' + cheatMsg, W / 2, H - 14);
+    ctx.shadowBlur  = 0; ctx.globalAlpha = 1;
+  }
 
   ctx.restore();
 }
@@ -654,7 +727,10 @@ function drawPlay() {
       ctx.shadowColor = pc;
       if (activePU.type === 'invis') ctx.globalAlpha = 0.35;
     }
-    drawTank(PL.x, PL.y, PL.w, PL.h, '#00cc66', '#00ffaa', true, aimAngle);
+    rainbowHue = (rainbowHue + 2.5) % 360;
+    const rBody = rainbowTank ? `hsl(${rainbowHue},100%,45%)` : '#00cc66';
+    const rTurr = rainbowTank ? `hsl(${(rainbowHue+60)%360},100%,60%)` : '#00ffaa';
+    drawTank(PL.x, PL.y, PL.w, PL.h, rBody, rTurr, true, aimAngle);
     ctx.shadowBlur  = 0;
     ctx.globalAlpha = 1;
     ctx.fillStyle   = 'rgba(0,255,80,0.12)';
@@ -727,6 +803,17 @@ function drawHUD() {
     ctx.textAlign   = 'center';
     ctx.fillText(PU_LABELS[activePU.type], W / 2, by + 12);
     ctx.shadowBlur  = 0;
+  }
+
+  // Active cheat badges
+  const activeCheatNames = Object.keys(cheats).filter(k => cheats[k]);
+  if (rainbowTank) activeCheatNames.push('rainbow');
+  if (activeCheatNames.length) {
+    ctx.font = 'bold 9px "Courier New"'; ctx.textAlign = 'left';
+    activeCheatNames.forEach((c, i) => {
+      ctx.fillStyle = `hsl(${i * 55}, 90%, 60%)`;
+      ctx.fillText('★' + c.toUpperCase(), 10 + i * 88, 36);
+    });
   }
 
   ctx.fillStyle   = '#00ff55';
@@ -802,7 +889,12 @@ function drawMenu() {
   }
   ctx.fillStyle = '#aacc66';
   ctx.font      = 'bold 13px "Courier New"';
-  ctx.fillText('[ U ]  UPGRADE SHOP', W / 2, H / 2 + 196);
+  ctx.fillText('[ U ]  UPGRADE SHOP      [ C ]  ???', W / 2, H / 2 + 196);
+
+  // Hidden hint — very faint
+  ctx.fillStyle = '#0e1e0e';
+  ctx.font      = '10px "Courier New"';
+  ctx.fillText('rumour: true commanders know the word "GODMODE"...', W / 2, H - 8);
 
   // Enemy showcase
   const showcase = [
@@ -911,6 +1003,79 @@ function drawShop() {
 
   ctx.fillStyle = '#336633'; ctx.font = '12px "Courier New"'; ctx.textAlign = 'center';
   ctx.fillText('\u2191\u2193 NAVIGATE    ENTER = BUY    ESC = BACK', W / 2, H - 66);
+  // Subtle hint
+  ctx.fillStyle = '#0d180d'; ctx.font = '10px "Courier New"';
+  ctx.fillText('why grind coins when "LOADED" exists...', W / 2, H - 50);
+}
+
+// ── Cheat Panel ───────────────────────────────
+function drawCheats() {
+  ctx.fillStyle = 'rgba(0,0,0,0.96)';
+  ctx.fillRect(0, 0, W, H);
+
+  // Scanline tint
+  ctx.fillStyle = 'rgba(0,60,0,0.18)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.shadowBlur  = 20; ctx.shadowColor = '#ff0044';
+  ctx.fillStyle   = '#ff0044';
+  ctx.font        = 'bold 28px "Courier New"';
+  ctx.textAlign   = 'center';
+  ctx.fillText('// CHEAT TERMINAL //', W / 2, 90);
+  ctx.shadowBlur  = 0;
+
+  ctx.fillStyle = '#226622';
+  ctx.font      = '11px "Courier New"';
+  ctx.fillText('TYPE A CODE AND PRESS ENTER  |  ESC TO LEAVE', W / 2, 116);
+
+  // Input box
+  const iw = 340, ix = (W - iw) / 2, iy = 138;
+  ctx.fillStyle   = '#050f05';
+  ctx.fillRect(ix, iy, iw, 36);
+  ctx.strokeStyle = (frame >> 3) & 1 ? '#00ff44' : '#226622';
+  ctx.lineWidth   = 2;
+  ctx.strokeRect(ix, iy, iw, 36);
+  ctx.fillStyle   = '#00ff44';
+  ctx.font        = 'bold 18px "Courier New"';
+  ctx.textAlign   = 'left';
+  ctx.fillText('> ' + cheatInput + ((frame >> 3) & 1 ? '_' : ' '), ix + 10, iy + 24);
+
+  // Cheat status list
+  const entries = [
+    { label: 'GODMODE',  desc: 'take no damage',      key: 'godmode'  },
+    { label: 'OVERKILL', desc: '3x bullet damage',     key: 'overkill' },
+    { label: 'LOADED',   desc: '+99999 coins (once)',  key: 'loaded'   },
+    { label: 'SPEEDY',   desc: '3x movement speed',    key: 'speedy'   },
+    { label: 'FULLCLIP', desc: 'no fire cooldown',     key: 'fullclip' },
+  ];
+  ctx.font = '12px "Courier New"';
+  entries.forEach((e, i) => {
+    const ey = 205 + i * 42;
+    const on = cheats[e.key];
+    ctx.fillStyle   = on ? 'rgba(0,255,80,0.12)' : 'rgba(255,255,255,0.03)';
+    ctx.fillRect(120, ey - 14, W - 240, 32);
+    ctx.strokeStyle = on ? '#00ff44' : '#1a331a';
+    ctx.lineWidth   = 1;
+    ctx.strokeRect(120, ey - 14, W - 240, 32);
+    ctx.fillStyle   = on ? '#00ff44' : '#446644';
+    ctx.font        = 'bold 13px "Courier New"';
+    ctx.textAlign   = 'left';
+    ctx.fillText(e.label, 136, ey + 4);
+    ctx.fillStyle   = '#334433';
+    ctx.font        = '11px "Courier New"';
+    ctx.fillText(e.desc, 136 + 110, ey + 4);
+    ctx.fillStyle   = on ? '#00ff44' : '#1f2e1f';
+    ctx.font        = 'bold 11px "Courier New"';
+    ctx.textAlign   = 'right';
+    ctx.fillText(on ? '[ ON ]' : '[ OFF ]', W - 136, ey + 4);
+  });
+
+  // Hint about konami
+  ctx.fillStyle = '#0d1a0d';
+  ctx.font      = '10px "Courier New"';
+  ctx.textAlign = 'center';
+  ctx.fillText('psst... the ancients speak of a secret sequence that paints your tank', W / 2, H - 50);
+  ctx.fillText('↑ ↑ ↓ ↓ ← → ← → ... you know the rest', W / 2, H - 34);
 }
 
 // ── Game Over ─────────────────────────────────
@@ -940,6 +1105,11 @@ function drawGameOver() {
     ctx.font      = 'bold 17px "Courier New"';
     ctx.fillText('PRESS ENTER TO PLAY AGAIN', W / 2, H / 2 + 104);
   }
+
+  // Whisper hints
+  ctx.fillStyle = '#1a0808'; ctx.font = '10px "Courier New"'; ctx.textAlign = 'center';
+  const goHints = ['try "SPEEDY" — dying slow is so last round', '"OVERKILL" sounds fun, just saying', '"FULLCLIP" — because reloading is overrated'];
+  ctx.fillText(goHints[Math.floor(score / 100) % goHints.length], W / 2, H - 10);
 }
 
 // ── Game control ──────────────────────────────
@@ -947,10 +1117,11 @@ function onEnter() {
   if      (state === 'menu')     startGame();
   else if (state === 'gameover') startGame();
   else if (state === 'shop')     buyUpgrade();
+  // cheats state Enter is handled directly in keydown
 }
 
 function onEscape() {
-  if (state === 'playing' || state === 'shop' || state === 'gameover')
+  if (state === 'playing' || state === 'shop' || state === 'gameover' || state === 'cheats')
     state = 'menu';
 }
 
@@ -962,6 +1133,16 @@ function buyUpgrade() {
   coins -= cost;
   upgrades[item.key]++;
   sfx('buy');
+}
+
+function activateCheat(cmd) {
+  const def = CHEAT_DEFS[cmd];
+  if (!def) { cheatMsg = 'UNKNOWN CODE: ' + cmd; cheatMsgTimer = 120; return; }
+  if (cmd === 'LOADED') { coins += 99999; }
+  else { cheats[def.key] = !cheats[def.key]; }
+  cheatMsg      = def.msg + (cmd !== 'LOADED' ? (cheats[def.key] ? ' [ON]' : ' [OFF]') : '');
+  cheatMsgTimer = 160;
+  sfx('powerup');
 }
 
 function startGame() {
