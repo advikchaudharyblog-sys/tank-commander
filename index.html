@@ -392,24 +392,11 @@ function update() {
     if (activePU.timer <= 0) activePU = null;
   }
 
-  // ── Collect power-ups ──
-  for (let i = powerups.length - 1; i >= 0; i--) {
-    const pu = powerups[i];
-    pu.timer--;
-    if (pu.timer <= 0) { powerups.splice(i, 1); continue; }
-    if (hits(pu.x, pu.y, 20, 20, PL.x, PL.y, PL.w, PL.h)) {
-      activePU = { type: pu.type, timer: PU_DURATION };
-      powerups.splice(i, 1);
-      sfx('powerup');
-      popup(PL.x, PL.y - 40, PU_LABELS[pu.type] + '!', PU_COLS[pu.type]);
-    }
-  }
-
   const spdMult = (activePU && activePU.type !== 'shield') ? 2 : 1;
   const spd = PL.spd * spdMult;
   if ((keys.ArrowLeft  || keys.KeyA) && PL.x - PL.w / 2 > 2)        PL.x -= spd;
   if ((keys.ArrowRight || keys.KeyD) && PL.x + PL.w / 2 < W - 2)    PL.x += spd;
-  if ((keys.ArrowUp    || keys.KeyW) && PL.y - PL.h / 2 > H * 0.46) PL.y -= spd;
+  if ((keys.ArrowUp    || keys.KeyW) && PL.y - PL.h / 2 > 42) PL.y -= spd;
   if ((keys.ArrowDown  || keys.KeyS) && PL.y + PL.h / 2 < H - 18)   PL.y += spd;
 
   if (keys.Space || keys.KeyZ) fireBullet();
@@ -490,10 +477,12 @@ function update() {
           burst(e.x, e.y, e.col, 18);
           sfx('boom');
           shakeFrames = 9; shakeAmt = 4;
-          // Drop random power-up when heavy boss is killed
+          // Instantly activate random power-up when heavy boss is killed
           if (e.key === 'heavy') {
             const type = PU_TYPES[Math.floor(Math.random() * PU_TYPES.length)];
-            powerups.push({ x: e.x, y: e.y, type, timer: 420 }); // 7 sec to collect
+            activePU = { type, timer: PU_DURATION };
+            sfx('powerup');
+            popup(PL.x, PL.y - 40, PU_LABELS[type] + '!', PU_COLS[type]);
           }
           // Respawn at top instead of deleting
           e.y  = -e.h - rnd(20, 120);
@@ -639,32 +628,6 @@ function drawPlay() {
     ctx.fillRect(bx, by, (bw * pct) | 0, 5);
     ctx.strokeStyle = '#444'; ctx.lineWidth = 1;
     ctx.strokeRect(bx, by, bw, 5);
-  }
-
-  // ── Power-up drops ──
-  for (const pu of powerups) {
-    const pulse = 0.7 + 0.3 * Math.sin(frame * 0.12);
-    ctx.shadowBlur  = 16 * pulse; ctx.shadowColor = PU_COLS[pu.type];
-    ctx.fillStyle   = PU_COLS[pu.type];
-    ctx.globalAlpha = pulse;
-    ctx.beginPath();
-    ctx.arc(pu.x | 0, pu.y | 0, 12, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 1; ctx.shadowBlur = 0;
-    ctx.fillStyle   = '#fff';
-    ctx.font        = 'bold 10px "Courier New"';
-    ctx.textAlign   = 'center';
-    const icon = { shield: 'S', invis: 'I', bloodhound: 'B' }[pu.type];
-    ctx.fillText(icon, pu.x | 0, (pu.y + 4) | 0);
-    // Fading timer ring
-    ctx.strokeStyle = PU_COLS[pu.type];
-    ctx.lineWidth   = 2;
-    ctx.globalAlpha = 0.4;
-    ctx.beginPath();
-    ctx.arc(pu.x | 0, pu.y | 0, 15, -Math.PI / 2,
-            -Math.PI / 2 + Math.PI * 2 * (pu.timer / 420));
-    ctx.stroke();
-    ctx.globalAlpha = 1;
   }
 
   // ── Player (mouse-aimed turret, blinks when invincible) ──
